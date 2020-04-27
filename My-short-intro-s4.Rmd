@@ -1,0 +1,297 @@
+---
+title: "short intro to s4"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("knitr")
+opts_chunk$set(echo = TRUE,
+               fig.align = 'center', 
+               fig.show = 'hold', 
+               par = TRUE,
+               prompt = TRUE,
+               eval = TRUE,
+               stop_on_error = 1L,
+               comment = NA)
+
+options(replace.assign = TRUE, 
+        width = 55)
+
+set.seed(1)
+```
+
+```{r}
+n <- 10
+m <- 6
+
+marray <- matrix(rnorm(n * m, 10,5 ), ncol = m)
+
+pmeta <- data.frame(sampleId = 1:m,
+                    condition = rep(c("WT", "MUT"), each = 3))
+rownames(pmeta) <- colnames(marray) <- LETTERS[1:m]
+
+fmeta <- data.frame(geneId = 1:n,
+                    pathway = sample(sample(LETTERS, n, replace = TRUE)))
+rownames(fmeta) <- row.names(marray) <- paste0("probe", 1:n)
+```
+
+```{r}
+maexp <- list(marray = marray,
+              fmeta = fmeta,
+              pmeta = pmeta)
+
+rm(marray, fmeta, pmeta)
+str(maexp)
+```
+
+```{r}
+maexp$pmeta
+```
+
+```{r}
+summary(maexp$marray[, "A"])
+```
+
+```{r}
+wt <- maexp$pmeta[, "condition"] == "WT"
+maexp$marray["probe8", wt]
+```
+
+```{r}
+maexp[["marray"]]["probe3", !wt]
+```
+
+```{r}
+boxplot(maexp$marray)
+```
+
+```{r}
+x <- 1:5
+y <- 1:3
+
+marray2 <- maexp$marray[x, y]
+fmeta2 <- maexp$fmeta[x,]
+pmeta2 <- maexp$pmeta[y,]
+
+maexp2 <- list(marray = marray2, fmeta = fmeta2, pmeta = pmeta2)
+
+rm(marray2, fmeta2, pmeta2)
+
+str(maexp2)
+```
+
+## into oop
+
+```{r}
+MArray <- setClass("MArray",
+                   slots = c(marray = "matrix",
+                             fmeta = "data.frame",
+                             pmeta = "data.frame"))
+```
+
+```{r}
+MArray()
+```
+
+```{r}
+ma <- MArray(marray = maexp[[1]],
+             pmeta = maexp[["pmeta"]],
+             fmeta = maexp[["fmeta"]])
+
+class(ma)
+```
+
+```{r}
+ma
+```
+
+### methods
+
+#### the `show` method
+
+```{r}
+show
+```
+
+```{r}
+isGeneric("show")
+```
+
+```{r}
+hasMethod("show")
+```
+
+```{r}
+setMethod("show",
+          signature = "MArray",
+          definition = function(object) {
+            cat("An object of class ", class(object), "\n", sep = "")
+            cat(" ", nrow(object@marray), " features by ",
+                ncol(object@marray), " samples.\n", sep ="")
+            invisible(NULL)
+          })
+```
+
+```{r}
+ma
+```
+
+#### accessors
+
+```{r}
+setGeneric("marray", function(object, ...) standardGeneric("marray"))
+```
+
+```{r}
+setMethod("marray", "MArray",
+          function(object) object@marray)
+
+marray(ma)
+```
+
+```{r}
+setGeneric("pmeta", function(object, ...) standardGeneric("pmeta"))
+setGeneric("fmeta", function(object, ...) standardGeneric("fmeta"))
+
+setMethod("pmeta", "MArray",
+          function(object) object@pmeta)
+setMethod("fmeta", "MArray",
+          function(object) object@fmeta)
+```
+
+#### subsetting
+
+```{r}
+setMethod("[", "MArray",
+          function(x, i, j, drop = "missing") {
+            .marray <- x@marray[i, j]
+            .pmeta <- x@pmeta[j, ]
+            .fmeta <- x@fmeta[i, ]
+            MArray(marray = .marray,
+                   fmeta = .fmeta,
+                   pmeta = .pmeta)
+          })
+```
+
+```{r}
+ma[1:5, 1:2]
+```
+
+#### the `validity` method
+
+```{r}
+setValidity("MArray", function(object) {
+    msg <- NULL
+    valid <- TRUE
+    if (nrow(marray(object)) != nrow(fmeta(object))) {
+        valid <- FALSE
+        msg <- c(msg, 
+                 "Number of data and feature meta-data rows must be identical.")
+    }
+    if (ncol(marray(object)) != nrow(pmeta(object))) {
+        valid <- FALSE
+        msg <- c(msg, 
+                 "Number of data rows and sample meta-data columns must be identical.")
+    }
+    if (!identical(rownames(marray(object)), rownames(fmeta(object)))) {
+        valid <- FALSE
+        msg <- c(msg, 
+                 "Data and feature meta-data row names must be identical.")        
+    }
+    if (!identical(colnames(marray(object)), rownames(pmeta(object)))) {
+        valid <- FALSE
+        msg <- c(msg, 
+                 "Data row names and sample meta-data columns names must be identical.")        
+    }
+    if (valid) TRUE else msg 
+})
+```
+
+```{r}
+validObject(ma)
+```
+
+#### replacement method
+
+```{r}
+setGeneric("marray<-", 
+           function(object, value) standardGeneric("marray<-"))
+```
+
+```{r}
+setMethod("marray<-", "MArray", 
+          function(object, value) {
+              object@marray <- value
+              if (validObject(object))
+                  return(object)
+})
+```
+
+```{r}
+tmp <- matrix(rnorm(n*m, 10, 5), ncol = m)
+
+colnames(tmp) <- LETTERS[1:m]
+rownames(tmp) <- paste0("probe", 1:n)
+head(marray(ma), n = 2)
+```
+
+```{r}
+marray(ma) <- tmp
+head(marray(ma), n = 2)
+```
+
+```{r}
+setGeneric("fmeta<-", function(object, value) standardGeneric("fmeta<-"))
+setMethod("fmeta<-", "MArray", 
+          function(object, value) {
+              object@fmeta <- value
+              if (validObject(object))
+                  return(object)
+})
+
+setGeneric("pmeta<-", function(object, value) standardGeneric("pmeta<-"))
+setMethod("pmeta<-", "MArray", 
+          function(object, value) {
+              object@pmeta <- value
+              if (validObject(object))
+                  return(object)
+})
+```
+
+```{r}
+pmeta(ma)$sex <- rep(c("M", "F"), 3)
+pmeta(ma)
+```
+
+#### introspection
+
+```{r}
+slotNames(ma)
+```
+
+```{r}
+getClass("MArray")
+```
+
+```{r}
+showMethods("marray")
+```
+
+```{r}
+showMethods(classes = "MArray")
+```
+
+```{r}
+getMethod("marray", "MArray")
+```
+
+### ExpressionSet of Biobase
+
+```{r}
+library("Biobase")
+```
+
+```{r}
+getClass("ExpressionSet")
+```
+
